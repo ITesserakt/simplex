@@ -4,18 +4,12 @@ use ndarray::{prelude::*, LinalgScalar};
 use num::{traits::NumAssign, Num, Zero};
 use std::{fmt::{Display}, ops::Div};
 
-use crate::{errors::SimplexMethodError};
-
-#[allow(dead_code)]
-pub enum Aim {
-    Minimize,
-    Maximize,
-}
+use crate::{errors::SimplexMethodError, parser::Goal};
 
 pub struct SimplexSolver<N> {
     _contents: Array2<N>,
     basis: Array1<usize>,
-    aim: Aim,
+    aim: Goal,
 }
 
 pub struct Solution<N> {
@@ -34,7 +28,7 @@ impl<F: Display + Num + NumAssign + Copy> Display for Solution<F> {
         }
 
         writeln!(f, "Optimal z is: {}", optimal_z)?;
-        writeln!(f, "Free variables are equal to: ")?;
+        writeln!(f, "Base variables are equal to: ")?;
         for &(i, item) in &self.basis_coeffs {
             writeln!(f, "   x{} = {item}", i + 1)?;
         }
@@ -66,7 +60,7 @@ impl<F> SimplexSolver<F> {
     pub fn from_canonical_matrix<const N: usize, const M: usize>(
         input: [[F; N]; M],
         z: [F; N],
-        aim: Aim,
+        aim: Goal,
     ) -> Self
     where
         F: Clone + Zero,
@@ -95,7 +89,7 @@ impl<F> SimplexSolver<F> {
         }
     }
 
-    pub fn from_contents(contents: Array2<F>, aim: Aim) -> SimplexSolver<F>
+    pub fn from_contents(contents: Array2<F>, aim: Goal) -> SimplexSolver<F>
     where
         F: Zero + Clone,
     {
@@ -121,8 +115,8 @@ impl<F> SimplexSolver<F> {
         F: Zero + PartialOrd,
     {
         match self.aim {
-            Aim::Minimize => self.z().iter().all(|x| *x <= F::zero()),
-            Aim::Maximize => self.z().iter().all(|x| *x >= F::zero()),
+            Goal::Minimize => self.z().iter().all(|x| *x <= F::zero()),
+            Goal::Maximize => self.z().iter().all(|x| *x >= F::zero()),
         }
     }
 
@@ -133,12 +127,12 @@ impl<F> SimplexSolver<F> {
         let z = self.z();
 
         match self.aim {
-            Aim::Minimize => z
+            Goal::Minimize => z
                 .indexed_iter()
                 .take(self.z().len() - 1)
                 .filter(|(_, x)| **x > F::zero())
                 .max_by_key(|x| x.1),
-            Aim::Maximize => z
+            Goal::Maximize => z
                 .indexed_iter()
                 .take(self.z().len() - 1)
                 .filter(|(_, x)| **x < F::zero())

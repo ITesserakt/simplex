@@ -6,13 +6,3 @@ pub enum SimplexMethodError {
     NoLimit,
     NoSolutions,
 }
-
-
-#[derive(Debug)]
-pub enum SimplexParseErr {
-    UnexpectedRelation,
-    EndOfInput,
-    NotANumber,
-    NoTarget,
-    Composite(Box<SimplexParseErr>, Box<SimplexParseErr>)
-}
