@@ -1,18 +1,18 @@
 use std::{
+    clone::Clone,
     collections::HashMap,
     fmt::{Debug, Display},
+    marker::PhantomData,
 };
 
 use ndarray::{aview0, Array1, Array2, Axis};
 use num::{traits::NumAssign, Num, Rational64, Zero};
 
+use crate::tax_numbers::Tax;
 use crate::{
     parser::{Goal, Relation, Task},
-    simplex::SimplexSolver
+    simplex::SimplexSolver,
 };
-
-#[cfg(feature = "taxes")]
-use crate::tax_numbers::Tax;
 
 #[derive(Debug)]
 struct SimplexTerm<F: Debug> {
@@ -40,16 +40,21 @@ pub struct SimplexTask<F: Debug> {
     target_fn: SimplexTarget<F>,
 }
 
-struct SimplaxTaskParts<F: Debug> {
+struct SimplexTaskParts<F: Debug> {
     a: Array2<F>,
     b: Array1<F>,
     z: Array1<F>,
 }
 
+pub struct Simple;
+pub struct Taxes;
+pub struct DoublePhase;
+
 #[derive(Debug)]
-pub struct CanonicSimplexTask<T: Debug> {
+pub struct CanonicSimplexTask<T: Debug, M> {
     task: SimplexTask<T>,
     max_index: u64,
+    phantom: PhantomData<M>,
 }
 
 impl<T: Debug + From<Rational64>> From<Task> for SimplexTask<T> {
@@ -93,7 +98,7 @@ impl<T: Debug + From<Rational64>> From<Task> for SimplexTask<T> {
 }
 
 impl<T: Debug> SimplexTask<T> {
-    pub fn canonize(mut self) -> CanonicSimplexTask<T>
+    pub fn canonize<M>(mut self) -> CanonicSimplexTask<T, M>
     where
         T: Num + NumAssign + PartialOrd,
     {
@@ -137,13 +142,16 @@ impl<T: Debug> SimplexTask<T> {
         CanonicSimplexTask {
             task: self,
             max_index,
+            phantom: PhantomData
         }
     }
 }
 
 #[cfg(not(feature = "taxes"))]
-impl<F: Display + Num + Clone + Debug + Copy> From<CanonicSimplexTask<F>> for SimplexSolver<F> {
-    fn from(val: CanonicSimplexTask<F>) -> Self {
+impl<F: Display + Num + Clone + Debug + Copy> From<CanonicSimplexTask<F, Simple>>
+    for SimplexSolver<F>
+{
+    fn from(val: CanonicSimplexTask<F, Simple>) -> Self {
         let goal = val.task.target_fn.goal.clone();
 
         let mut parts = val.into_a_b_z();
@@ -154,11 +162,12 @@ impl<F: Display + Num + Clone + Debug + Copy> From<CanonicSimplexTask<F>> for Si
     }
 }
 
-#[cfg(feature = "taxes")]
-impl<F: Display + Num + Clone + Debug + Copy> Into<SimplexSolver<Tax<F>>> for CanonicSimplexTask<Tax<F>> {
-    fn into(self) -> SimplexSolver<Tax<F>> {
-        let goal = self.task.target_fn.goal.clone();
-        let mut parts = self.into_a_b_z();
+impl<F: Display + Num + Clone + Debug + Copy> From<CanonicSimplexTask<Tax<F>, Taxes>>
+    for SimplexSolver<Tax<F>>
+{
+    fn from(val: CanonicSimplexTask<Tax<F>, Taxes>) -> Self {
+        let goal = val.task.target_fn.goal.clone();
+        let mut parts = val.into_a_b_z();
         parts.add_taxes();
         parts.add_basis();
         parts.invert_z();
@@ -168,8 +177,22 @@ impl<F: Display + Num + Clone + Debug + Copy> Into<SimplexSolver<Tax<F>>> for Ca
     }
 }
 
-impl<T: Debug> CanonicSimplexTask<T> {
-    fn into_a_b_z(self) -> SimplaxTaskParts<T>
+impl<F: Display + Num + Clone + Debug + Copy> From<CanonicSimplexTask<F, DoublePhase>>
+    for SimplexSolver<F>
+{
+    fn from(val: CanonicSimplexTask<F, DoublePhase>) -> Self {
+        let goal = val.task.target_fn.goal.clone();
+        let mut parts = val.into_a_b_z();
+        parts.add_basis();
+        parts.invert_z();
+        let contents = parts.into_contents();
+
+        SimplexSolver::from_contents(contents, goal)
+    }
+}
+
+impl<T: Debug, M> CanonicSimplexTask<T, M> {
+    fn into_a_b_z(self) -> SimplexTaskParts<T>
     where
         T: Copy + Zero,
     {
@@ -205,51 +228,64 @@ impl<T: Debug> CanonicSimplexTask<T> {
         });
         let b = Array1::from_shape_vec(
             restrictions_len,
-            self.task
-                .restrictions
-                .into_iter()
-                .map(|x| x.free)
-                .collect(),
+            self.task.restrictions.into_iter().map(|x| x.free).collect(),
         )
         .unwrap();
         let mut z = Array1::from_shape_fn(self.max_index as usize, |i| {
             *z_hash_map.entry(i).or_insert(T::zero())
         });
-        z.push(Axis(0), aview0(&self.task.target_fn.free))
-            .unwrap();
+        z.push(Axis(0), aview0(&self.task.target_fn.free)).unwrap();
 
-        SimplaxTaskParts { a, b, z }
+        SimplexTaskParts { a, b, z }
     }
 }
 
-#[cfg(feature = "taxes")]
-impl<T: Debug + std::fmt::Display + num::Num + std::clone::Clone> SimplaxTaskParts<Tax<T>> {
+impl<T: Debug + Display + Num + Clone> SimplexTaskParts<Tax<T>> {
     fn add_taxes(&mut self)
     where
         T: Num + Clone + Display,
     {
         let mut taxed = self.a.sum_axis(Axis(0)).mapv(|x| x.into_tax());
-        taxed.push(Axis(0), aview0(&self.b.sum().into_tax())).unwrap();
+        taxed
+            .push(Axis(0), aview0(&self.b.sum().into_tax()))
+            .unwrap();
 
-        self.z.zip_mut_with(&taxed, |x, y| *x = x.clone() + y.clone())
+        self.z
+            .zip_mut_with(&taxed, |x, y| *x = x.clone() + y.clone())
     }
 }
 
-impl<T: Debug> SimplaxTaskParts<T> {
-    #[cfg(feature = "taxes")]
-    fn add_basis(&mut self) where T: Clone + Num {
+impl<T: Debug> SimplexTaskParts<T> {
+    fn add_basis(&mut self)
+    where
+        T: Clone + Num,
+    {
         let max_index = self.z.len() - 1;
         let restrictions_len = self.a.len_of(Axis(0));
-        self.a.append(Axis(1), Array2::eye(restrictions_len).view()).unwrap();
-        self.z.append(Axis(0), Array1::from_elem(restrictions_len, T::zero()).view()).unwrap();
+        self.a
+            .append(Axis(1), Array2::eye(restrictions_len).view())
+            .unwrap();
+        self.z
+            .append(
+                Axis(0),
+                Array1::from_elem(restrictions_len, T::zero()).view(),
+            )
+            .unwrap();
         self.z.swap(max_index, max_index + restrictions_len);
     }
 
-    fn invert_z(&mut self) where T: Num + Clone {
-        self.z.map_inplace(|x| *x = x.clone() * (T::zero() - T::one()));
+    fn invert_z(&mut self)
+    where
+        T: Num + Clone,
+    {
+        self.z
+            .map_inplace(|x| *x = x.clone() * (T::zero() - T::one()));
     }
 
-    fn into_contents(mut self) -> Array2<T> where T: Clone {
+    fn into_contents(mut self) -> Array2<T>
+    where
+        T: Clone,
+    {
         self.a.push_column(self.b.view()).unwrap();
         self.a.push_row(self.z.view()).unwrap();
 

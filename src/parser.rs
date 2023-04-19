@@ -2,18 +2,23 @@ use std::{fmt::Debug, str::FromStr};
 
 use nom::{
     branch::alt,
-    bytes::{
-        complete::{tag, tag_no_case},
-    },
+    bytes::complete::{tag, tag_no_case},
     character::complete::char,
-    character::complete::{multispace0, one_of, line_ending},
+    character::complete::{line_ending, multispace0, one_of},
     combinator::{opt, recognize},
     error::{context, ContextError, ParseError},
     multi::{many0, many1, separated_list1},
-    sequence::{delimited, terminated, preceded},
+    sequence::{delimited, preceded, terminated},
     IResult, Parser,
 };
 use num::{One, Rational64};
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Method {
+    Simple,
+    Taxes,
+    SecondPhase,
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Goal {
@@ -52,6 +57,7 @@ pub struct Restriction {
 pub struct Task {
     pub restrictions: Vec<Restriction>,
     pub target_fn: TargetFn,
+    pub method: Method
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -196,6 +202,28 @@ where
     })
 }
 
+fn method<'a, E>() -> impl Parser<&'a str, Method, E>
+where
+    E: ParseError<&'a str> + ContextError<&'a str>,
+{
+    context("method", |s| {
+        let (s, _) = ws(tag_no_case("solve using")).parse(s)?;
+        let (s, method) = alt((
+            tag_no_case("simple method"),
+            tag_no_case("taxes"),
+            tag_no_case("second phase"),
+        ))
+        .parse(s)?;
+
+        Ok((s, match method {
+            "simple method" => Method::Simple,
+            "taxes" => Method::Taxes,
+            "second phase" => Method::SecondPhase,
+            _ => unreachable!()
+        }))
+    })
+}
+
 impl Task {
     fn parse<'a, E>() -> impl Parser<&'a str, Task, E>
     where
@@ -205,12 +233,15 @@ impl Task {
             let (s, restrictions) = separated_list1(line_ending, restriction()).parse(s)?;
             let (s, _) = line_ending(s)?;
             let (s, target_fn) = target_fn().parse(s)?;
+            let (s, _) = opt(line_ending).parse(s)?;
+            let (s, method) = opt(method()).parse(s)?;
 
             Ok((
                 s,
                 Self {
                     restrictions,
                     target_fn,
+                    method: method.unwrap_or(Method::Simple)
                 },
             ))
         })

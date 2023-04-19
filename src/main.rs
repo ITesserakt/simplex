@@ -8,7 +8,7 @@ use std::{
 
 use num::Rational64;
 
-use crate::{task::SimplexTask, simplex::SimplexSolver, tax_numbers::Tax, parser::Task};
+use crate::{task::{SimplexTask, Simple, Taxes, DoublePhase}, simplex::SimplexSolver, tax_numbers::Tax, parser::Task};
 
 mod errors;
 mod simplex;
@@ -21,8 +21,13 @@ fn main() {
     let input = read_to_string(input_path).unwrap();
 
     let task: Task = input.parse().expect("Cannot parse given input");
+    let method = task.method;
     let task: SimplexTask<Tax<Rational64>> = task.into();
-    let solver: SimplexSolver<Tax<Rational64>> = task.canonize().into();
+    let solver: SimplexSolver<Tax<Rational64>> = match method {
+        parser::Method::Simple => task.canonize::<Simple>().into(),
+        parser::Method::Taxes => task.canonize::<Taxes>().into(),
+        parser::Method::SecondPhase => task.canonize::<DoublePhase>().into(),
+    };
     let solution = solver.solve().expect("Cannot get solution");
 
     println!("{solution}");

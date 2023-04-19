@@ -10,7 +10,6 @@ use num::{traits::NumAssign, Complex, Num, One, Zero};
 pub struct Tax<T>(Complex<T>); // T + T * M
 
 impl<T> Tax<T> {
-    #[cfg(feature = "taxes")]
     pub fn into_tax(self) -> Tax<T> where T: Zero {
         Tax(Complex { re: T::zero(), im: self.0.re })
     }
