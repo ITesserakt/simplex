@@ -1,20 +1,21 @@
 #![feature(slice_flatten)]
-#![feature(drain_filter)]
 
-use std::{
-    env::args,
-    fs::read_to_string,
-};
+use std::{env::args, fs::read_to_string};
 
 use num::Rational64;
 
-use crate::{task::{SimplexTask, Simple, Taxes, DoublePhase}, simplex::SimplexSolver, tax_numbers::Tax, parser::Task};
+use crate::{
+    parser::Task,
+    simplex::SimplexSolver,
+    task::{DoublePhase, Simple, SimplexTask, Taxes},
+    tax_numbers::Tax,
+};
 
 mod errors;
+mod parser;
 mod simplex;
 mod task;
 mod tax_numbers;
-mod parser;
 
 fn main() {
     let input_path = args().nth(1).unwrap_or("input.txt".to_owned());
